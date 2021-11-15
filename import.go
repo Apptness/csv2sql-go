@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/csv"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"os"
@@ -148,7 +147,6 @@ func (c *ImportCmd) Execute(cmd *cobra.Command, args []string) {
 			wg.Add(1)
 
 			bulkQuery := c.parseBulkColumns(firstRowColumns, records)
-			fmt.Printf("%s\n", bulkQuery)
 			go c.insert(id, bulkQuery, db, callback, &connections, &wg, strings2interface(records))
 		}
 	}
