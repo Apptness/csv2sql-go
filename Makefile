@@ -8,3 +8,6 @@ csv2sql:
 
 clean:
 	rm -f csv2sql-go
+
+install:
+	cp csv2sql-go /usr/local/bin
