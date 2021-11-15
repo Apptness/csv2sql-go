@@ -4,9 +4,11 @@ import (
 	"database/sql"
 	"encoding/csv"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +23,7 @@ type ImportCmd struct {
 	Delim       *string
 	Db          *string
 	Concurrency *int
+	Bulk        *int
 }
 
 func (c *ImportCmd) Flags(fs *pflag.FlagSet) {
@@ -29,6 +32,7 @@ func (c *ImportCmd) Flags(fs *pflag.FlagSet) {
 	c.Delim = fs.String("delim", ",", "CSV Delimiter")
 	c.Db = fs.String("db", "", "Db")
 	c.Concurrency = fs.Int("concurrency", 1, "Concurrency")
+	c.Bulk = fs.Int("bulk", 1, "Bulk")
 }
 
 func (c *ImportCmd) ValidateFlags() error {
@@ -47,6 +51,10 @@ func (c *ImportCmd) ValidateFlags() error {
 
 	if *c.Concurrency < 0 {
 		return errors.New("Please supply a valid --concurrency (>0)")
+	}
+
+	if *c.Bulk < 0 {
+		return errors.New("Please supply a valid --bulk (>0)")
 	}
 
 	return nil
@@ -90,7 +98,6 @@ func (c *ImportCmd) Execute(cmd *cobra.Command, args []string) {
 
 	start := time.Now() // to measure execution time
 
-	query := ""                                  // query statement
 	callback := make(chan int)                   // callback channel for insert goroutines
 	connections := 0                             // number of concurrent connections
 	insertions := 0                              // counts how many insertions have finished
@@ -108,27 +115,41 @@ func (c *ImportCmd) Execute(cmd *cobra.Command, args []string) {
 	var wg sync.WaitGroup
 	id := 1
 	isFirstRow := true
+	firstRowColumns := []string{}
 
 	for {
-		record, err := reader.Read()
-		if err == io.EOF {
-			break
+		records := [][]string{}
+		for i := 0; i < *c.Bulk; i++ {
+			record, err := reader.Read()
+			if err == io.EOF {
+				break
+			}
+			records = append(records, record)
 		}
 		if err != nil {
 			log.Fatal(err.Error())
 		}
 
+		if len(records) == 0 {
+			break
+		}
+
 		if isFirstRow {
 
-			c.parseColumns(record, &query)
+			query := "" // query statement
+			c.parseColumns(records[0], &query)
 			isFirstRow = false
+			firstRowColumns = records[0]
 
 		} else if <-available { // wait for available database connection
 
 			connections += 1
 			id += 1
 			wg.Add(1)
-			go c.insert(id, query, db, callback, &connections, &wg, string2interface(record))
+
+			bulkQuery := c.parseBulkColumns(firstRowColumns, records)
+			fmt.Printf("%s\n", bulkQuery)
+			go c.insert(id, bulkQuery, db, callback, &connections, &wg, strings2interface(records))
 		}
 	}
 
@@ -210,6 +231,36 @@ func (c *ImportCmd) parseColumns(columns []string, query *string) {
 	*query += ") " + placeholder
 }
 
+// parse csv columns, create query statement
+func (c *ImportCmd) parseBulkColumns(columns []string, bulks [][]string) string {
+
+	query := []string{}
+
+	query = append(query, "INSERT INTO "+*c.Table+" (")
+	for i, column := range columns {
+		query = append(query, column)
+		if i != (len(columns) - 1) {
+			query = append(query, ",")
+		}
+	}
+	query = append(query, ") VALUES ")
+	for i, entry := range bulks {
+		query = append(query, "(")
+		for j, _ := range entry {
+			query = append(query, "?")
+			if j != (len(entry) - 1) {
+				query = append(query, ",")
+			}
+		}
+		query = append(query, ")")
+		if i != (len(bulks) - 1) {
+			query = append(query, ",")
+		}
+	}
+
+	return strings.Join(query, " ")
+}
+
 // convert []string to []interface{}
 func string2interface(s []string) []interface{} {
 
@@ -218,4 +269,32 @@ func string2interface(s []string) []interface{} {
 		i[k] = v
 	}
 	return i
+}
+
+// convert []string to []interface{}
+/*
+func strings2interface(s [][]string) []interface{} {
+
+	j := make([]interface{}, len(s))
+	for jk, jv := range s {
+		i := make([]interface{}, len(jv))
+		for ik, iv := range jv {
+			i[ik] = iv
+		}
+		j[jk] = i
+	}
+	return j
+}
+*/
+func strings2interface(s [][]string) []interface{} {
+
+	j := make([]interface{}, len(s)*len(s[0]))
+	i := 0
+	for _, jv := range s {
+		for _, iv := range jv {
+			j[i] = iv
+			i += 1
+		}
+	}
+	return j
 }
