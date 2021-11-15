@@ -13,7 +13,7 @@ If you haven't installed docker, you have to create your own MySQL instance
 
 ## Usage
 ```
-go run main.go -d="," -table="<tablename>" -max_conns=145 <filename>
+go run main.go -d="," import --file /tmp/yo.csv --table yo --db 'local:local@tcp(127.0.0.1:3306)/local'
 ```
 Whereas -d is the comma used in your .csv file
 Usually you only need to run:
