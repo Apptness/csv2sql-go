@@ -32,6 +32,7 @@ type ImportCmd struct {
 	RemapColumns          *string
 	RemapColumns_         map[string]string
 	IgnoreErrors          *bool
+	DryRun                *bool
 }
 
 func (c *ImportCmd) Flags(fs *pflag.FlagSet) {
@@ -46,6 +47,7 @@ func (c *ImportCmd) Flags(fs *pflag.FlagSet) {
 	c.IgnoreColumns = fs.String("ignore-columns", "", "ignore columns")
 	c.RemapColumns = fs.String("remap-columns", "", "remap columns: x=y,i=j")
 	c.IgnoreErrors = fs.Bool("ignore-errors", false, "ignore errors")
+	c.DryRun = fs.Bool("dry-run", false, "dry run")
 }
 
 func (c *ImportCmd) ValidateFlags() error {
@@ -216,6 +218,10 @@ func (c *ImportCmd) Execute(cmd *cobra.Command, args []string) {
 
 // inserts data into database
 func (c *ImportCmd) insert(id int, query string, db *sql.DB, callback chan<- int, conns *int, wg *sync.WaitGroup, args []interface{}) {
+
+	if *c.DryRun {
+		log.Printf("%s %v\n", query, args)
+	}
 
 	// make a new statement for every insert,
 	// this is quite inefficient, but since all inserts are running concurrently,
