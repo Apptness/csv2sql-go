@@ -221,6 +221,7 @@ func (c *ImportCmd) insert(id int, query string, db *sql.DB, callback chan<- int
 
 	if *c.DryRun {
 		log.Printf("%s %v\n", query, args)
+		return
 	}
 
 	// make a new statement for every insert,
