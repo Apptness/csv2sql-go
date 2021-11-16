@@ -12,17 +12,20 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/segmentio/fasthash/fnv1a"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
 
 type ImportCmd struct {
-	Table       *string
-	File        *string
-	Delim       *string
-	Db          *string
-	Concurrency *int
-	Bulk        *int
+	Table                 *string
+	File                  *string
+	Delim                 *string
+	Db                    *string
+	Concurrency           *int
+	Bulk                  *int
+	SquashConsecutiveDups *bool
+	SquashAllDupsPerBulk  *bool
 }
 
 func (c *ImportCmd) Flags(fs *pflag.FlagSet) {
@@ -32,6 +35,8 @@ func (c *ImportCmd) Flags(fs *pflag.FlagSet) {
 	c.Db = fs.String("db", "", "Db")
 	c.Concurrency = fs.Int("concurrency", 1, "Concurrency")
 	c.Bulk = fs.Int("bulk", 1, "Bulk")
+	c.SquashConsecutiveDups = fs.Bool("squash-consecutive-dups", false, "squash consecutive dups")
+	c.SquashAllDupsPerBulk = fs.Bool("squash-all-dups-per-bulk", false, "squash all dups per bulk")
 }
 
 func (c *ImportCmd) ValidateFlags() error {
@@ -125,7 +130,8 @@ func (c *ImportCmd) Execute(cmd *cobra.Command, args []string) {
 			}
 			records = append(records, record)
 		}
-		if err != nil {
+
+		if err != nil && err != io.EOF {
 			log.Fatal(err.Error())
 		}
 
@@ -140,14 +146,16 @@ func (c *ImportCmd) Execute(cmd *cobra.Command, args []string) {
 			isFirstRow = false
 			firstRowColumns = records[0]
 
-		} else if <-available { // wait for available database connection
+		}
+
+		if <-available { // wait for available database connection
 
 			connections += 1
 			id += 1
 			wg.Add(1)
 
-			bulkQuery := c.parseBulkColumns(firstRowColumns, records)
-			go c.insert(id, bulkQuery, db, callback, &connections, &wg, strings2interface(records))
+			bulkQuery, bulkItems := c.parseBulkColumns(firstRowColumns, records)
+			go c.insert(id, bulkQuery, db, callback, &connections, &wg, bulkItems)
 		}
 	}
 
@@ -230,9 +238,12 @@ func (c *ImportCmd) parseColumns(columns []string, query *string) {
 }
 
 // parse csv columns, create query statement
-func (c *ImportCmd) parseBulkColumns(columns []string, bulks [][]string) string {
+func (c *ImportCmd) parseBulkColumns(columns []string, bulks [][]string) (string, []interface{}) {
 
+	bulkItems := make([]interface{}, 0)
+	bulkItemMap := make(map[uint64]bool)
 	query := []string{}
+	columnsLen := len(columns)
 
 	query = append(query, "INSERT IGNORE INTO "+*c.Table+" (")
 	for i, column := range columns {
@@ -242,21 +253,49 @@ func (c *ImportCmd) parseBulkColumns(columns []string, bulks [][]string) string 
 		}
 	}
 	query = append(query, ") VALUES ")
+	lastEntryKey := uint64(0)
 	for i, entry := range bulks {
+		if len(entry) != columnsLen {
+			continue
+		}
+		entryKey := uint64(0)
+		if *c.SquashAllDupsPerBulk || *c.SquashConsecutiveDups {
+			entryKey = fnv1a.HashString64(strings.Join(entry, ""))
+		}
+		if *c.SquashAllDupsPerBulk {
+			if o, ok := bulkItemMap[entryKey]; ok && o {
+				// found, skip!
+				continue
+			} else {
+				bulkItemMap[entryKey] = true
+			}
+		}
+		if *c.SquashConsecutiveDups {
+			if lastEntryKey == 0 {
+				lastEntryKey = entryKey
+			} else {
+				if entryKey == lastEntryKey {
+					// skip!
+					continue
+				}
+			}
+		}
+		if i != 0 {
+			query = append(query, ",")
+		}
 		query = append(query, "(")
-		for j, _ := range entry {
+		for j, jv := range entry {
 			query = append(query, "?")
+			bulkItems = append(bulkItems, jv)
 			if j != (len(entry) - 1) {
 				query = append(query, ",")
 			}
 		}
 		query = append(query, ")")
-		if i != (len(bulks) - 1) {
-			query = append(query, ",")
-		}
 	}
 
-	return strings.Join(query, " ")
+	bulkQuery := strings.Join(query, " ")
+	return bulkQuery, bulkItems
 }
 
 // convert []string to []interface{}
@@ -269,21 +308,7 @@ func string2interface(s []string) []interface{} {
 	return i
 }
 
-// convert []string to []interface{}
 /*
-func strings2interface(s [][]string) []interface{} {
-
-	j := make([]interface{}, len(s))
-	for jk, jv := range s {
-		i := make([]interface{}, len(jv))
-		for ik, iv := range jv {
-			i[ik] = iv
-		}
-		j[jk] = i
-	}
-	return j
-}
-*/
 func strings2interface(s [][]string) []interface{} {
 	maxLen := len(s) * len(s[0])
 	j := make([]interface{}, maxLen)
@@ -299,3 +324,4 @@ func strings2interface(s [][]string) []interface{} {
 	}
 	return j
 }
+*/
