@@ -174,12 +174,12 @@ func (c *ImportCmd) Execute(cmd *cobra.Command, args []string) {
 			// filter columns
 			columns := []string{}
 		ColumnLoop:
-			for _, v := range records[0] {
+			for vk, v := range records[0] {
 				col := v
 				if *c.IgnoreColumns != "" {
-					for wk, w := range c.IgnoreColumns_ {
+					for _, w := range c.IgnoreColumns_ {
 						if v == w {
-							c.IgnoreColumnsMap_[wk] = true
+							c.IgnoreColumnsMap_[vk] = true
 							continue ColumnLoop
 						}
 					}
