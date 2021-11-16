@@ -286,7 +286,7 @@ func strings2interface(s [][]string) []interface{} {
 */
 func strings2interface(s [][]string) []interface{} {
 
-	j := make([]interface{}, len(s)*len(s[0]))
+	j := make([]interface{}, (len(s)*len(s[0]) + 1))
 	i := 0
 	for _, jv := range s {
 		for _, iv := range jv {
