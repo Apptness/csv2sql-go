@@ -285,11 +285,14 @@ func strings2interface(s [][]string) []interface{} {
 }
 */
 func strings2interface(s [][]string) []interface{} {
-
-	j := make([]interface{}, (len(s)*len(s[0]) + 1))
+	maxLen := len(s) * len(s[0])
+	j := make([]interface{}, maxLen)
 	i := 0
 	for _, jv := range s {
 		for _, iv := range jv {
+			if i >= maxLen {
+				break
+			}
 			j[i] = iv
 			i += 1
 		}
