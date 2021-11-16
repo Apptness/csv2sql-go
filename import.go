@@ -26,6 +26,12 @@ type ImportCmd struct {
 	Bulk                  *int
 	SquashConsecutiveDups *bool
 	SquashAllDupsPerBulk  *bool
+	IgnoreColumns         *string
+	IgnoreColumns_        []string
+	IgnoreColumnsMap_     map[int]bool
+	RemapColumns          *string
+	RemapColumns_         map[string]string
+	IgnoreErrors          *bool
 }
 
 func (c *ImportCmd) Flags(fs *pflag.FlagSet) {
@@ -37,6 +43,9 @@ func (c *ImportCmd) Flags(fs *pflag.FlagSet) {
 	c.Bulk = fs.Int("bulk", 1, "Bulk")
 	c.SquashConsecutiveDups = fs.Bool("squash-consecutive-dups", false, "squash consecutive dups")
 	c.SquashAllDupsPerBulk = fs.Bool("squash-all-dups-per-bulk", false, "squash all dups per bulk")
+	c.IgnoreColumns = fs.String("ignore-columns", "", "ignore columns")
+	c.RemapColumns = fs.String("remap-columns", "", "remap columns: x=y,i=j")
+	c.IgnoreErrors = fs.Bool("ignore-errors", false, "ignore errors")
 }
 
 func (c *ImportCmd) ValidateFlags() error {
@@ -59,6 +68,23 @@ func (c *ImportCmd) ValidateFlags() error {
 
 	if *c.Bulk < 0 {
 		return errors.New("Please supply a valid --bulk (>0)")
+	}
+
+	c.IgnoreColumnsMap_ = make(map[int]bool)
+	if *c.IgnoreColumns != "" {
+		c.IgnoreColumns_ = strings.Split(*c.IgnoreColumns, ",")
+	}
+
+	c.RemapColumns_ = make(map[string]string)
+	if *c.RemapColumns != "" {
+		mappings := strings.Split(*c.RemapColumns, ",")
+		for _, v := range mappings {
+			xy := strings.Split(v, "=")
+			if len(xy) < 2 {
+				return errors.New("Remap Columns = invalid -> syntx is: column_x=column_y,column_a=column_b,...")
+			}
+			c.RemapColumns_[xy[0]] = xy[1]
+		}
 	}
 
 	return nil
@@ -142,9 +168,31 @@ func (c *ImportCmd) Execute(cmd *cobra.Command, args []string) {
 		if isFirstRow {
 
 			query := "" // query statement
-			c.parseColumns(records[0], &query)
+
+			// filter columns
+			columns := []string{}
+		ColumnLoop:
+			for _, v := range records[0] {
+				col := v
+				if *c.IgnoreColumns != "" {
+					for wk, w := range c.IgnoreColumns_ {
+						if v == w {
+							c.IgnoreColumnsMap_[wk] = true
+							continue ColumnLoop
+						}
+					}
+				}
+				if *c.RemapColumns != "" {
+					if w, ok := c.RemapColumns_[v]; ok {
+						col = w
+					}
+				}
+				columns = append(columns, col)
+			}
+
+			c.parseColumns(columns, &query)
 			isFirstRow = false
-			firstRowColumns = records[0]
+			firstRowColumns = columns
 
 		}
 
@@ -243,7 +291,6 @@ func (c *ImportCmd) parseBulkColumns(columns []string, bulks [][]string) (string
 	bulkItems := make([]interface{}, 0)
 	bulkItemMap := make(map[uint64]bool)
 	query := []string{}
-	columnsLen := len(columns)
 
 	query = append(query, "INSERT IGNORE INTO "+*c.Table+" (")
 	for i, column := range columns {
@@ -255,9 +302,10 @@ func (c *ImportCmd) parseBulkColumns(columns []string, bulks [][]string) (string
 	query = append(query, ") VALUES ")
 	lastEntryKey := uint64(0)
 	for i, entry := range bulks {
-		if len(entry) != columnsLen {
-			continue
-		}
+		// CRITICAL: this protected us from an invalid csv line.. but, with ignore columns, it won't work!
+		// if len(entry) != columnsLen {
+		//	continue
+		// }
 		entryKey := uint64(0)
 		if *c.SquashAllDupsPerBulk || *c.SquashConsecutiveDups {
 			entryKey = fnv1a.HashString64(strings.Join(entry, ""))
@@ -285,6 +333,11 @@ func (c *ImportCmd) parseBulkColumns(columns []string, bulks [][]string) (string
 		}
 		query = append(query, "(")
 		for j, jv := range entry {
+			if *c.IgnoreColumns != "" {
+				if _, ok := c.IgnoreColumnsMap_[j]; ok {
+					continue
+				}
+			}
 			query = append(query, "?")
 			bulkItems = append(bulkItems, jv)
 			if j != (len(entry) - 1) {
@@ -295,6 +348,7 @@ func (c *ImportCmd) parseBulkColumns(columns []string, bulks [][]string) (string
 	}
 
 	bulkQuery := strings.Join(query, " ")
+
 	return bulkQuery, bulkItems
 }
 
