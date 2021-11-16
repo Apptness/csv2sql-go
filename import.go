@@ -234,7 +234,7 @@ func (c *ImportCmd) parseBulkColumns(columns []string, bulks [][]string) string 
 
 	query := []string{}
 
-	query = append(query, "INSERT INTO "+*c.Table+" (")
+	query = append(query, "INSERT IGNORE INTO "+*c.Table+" (")
 	for i, column := range columns {
 		query = append(query, column)
 		if i != (len(columns) - 1) {
