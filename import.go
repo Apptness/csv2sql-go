@@ -214,7 +214,7 @@ func (c *ImportCmd) startLogger(insertions, connections *int) {
 // parse csv columns, create query statement
 func (c *ImportCmd) parseColumns(columns []string, query *string) {
 
-	*query = "INSERT INTO " + *c.Table + " ("
+	*query = "INSERT IGNORE INTO " + *c.Table + " ("
 	placeholder := "VALUES ("
 	for i, c := range columns {
 		if i == 0 {
